@@ -1,0 +1,621 @@
+---
+title: "Spectral_clustering"
+output: html_document
+setwd("C:/Users/joshu/Desktop/SC_project")
+---
+
+
+```{r}
+## Functions -------------------------------------------------------------------------------------------------------------------------------
+
+"%^%" <- function(M, power) with(eigen(M), vectors %*% (values^power * solve(vectors)))
+
+## Distance Measures -----------------------------------------------------------
+
+## Euclidean Distance
+d.ED <- function(x1, x2, alpha=1) {
+  return(norm(as.matrix(x1-x2)))
+ }
+
+## Gaussian Kernel
+d.GK <- function(x1, x2, alpha=1) {
+ return( exp(- alpha * norm(as.matrix(x1-x2), type="F")))
+}
+
+
+## Similarity Matrix -----------------------------------------------------------
+
+SimMatrix <- function(data,dfunc){
+
+  n <- nrow(data)
+  S <- matrix(nrow = n, ncol=n)
+  for(i in 1:n) {
+    for(j in 1:n) {
+      S[i,j] <- dfunc(data[i,],data[j,])
+    }
+  }
+  return(S)
+
+}
+
+## Affinity Matrix -------------------------------------------------------------
+
+AffMatrix <- function(S, nn) {
+  N <- length(S[,1])
+
+  if (nn >= N) {
+    A <- S
+  } else {
+    A <- matrix(0,nrow = N, ncol=N)
+    for(i in 1:N) {
+      ranked.distance <- sort(S[i,], decreasing=TRUE)[1:(nn+1)]
+      for (k in ranked.distance) {
+        j <- which(S[i,] == k)
+        A[i,j] <- S[i,j]
+        A[j,i] <- S[i,j]
+      }
+    }
+  }
+   return(A)
+}
+
+Dmatrix <- function(A){
+  return(diag(apply(A,1,sum)))
+}
+
+## Laplacian functions ---------------------------------------------------------
+
+L.unormalised <- function(data,dfunc,k,nn){
+A<- AffMatrix(SimMatrix(data,dfunc),nn)
+D<- Dmatrix(A)
+return(D-A)
+}
+
+L.rw <- function(data,dfunc,k,nn){
+A<- AffMatrix(SimMatrix(data,dfunc),nn)
+D<- Dmatrix(A)
+I<- diag(x=1,nrow=nrow(D),ncol=ncol(D))
+return(I-solve(D)%*%A)
+} 
+
+L.sym<- function(data,dfunc,k,nn){
+A<- AffMatrix(SimMatrix(data,dfunc),nn)
+D<- Dmatrix(A)
+
+return((D%^%(-0.5))%*%(D-A)%*%(D%^%(-0.5)))
+}
+
+
+```
+
+
+```{r}
+library(base)
+Specc.unormalised <- function(data,dfunc,k,nn){
+ L<- L.unormalised(data,dfunc,k,nn)
+ eigenv <- eigen(L, symmetric=TRUE)
+ U<- eigenv$vectors[,(ncol(eigenv$vectors)-k+1):ncol(eigenv$vectors)]
+ km <- kmeans(U, centers=k, nstart=5)
+ return(km)
+}
+
+Specc.rw <- function(data,dfunc,k,nn){
+ L<- L.rw(data,dfunc,k,nn)
+ eigenv <- eigen(L, symmetric=FALSE)
+ U<- eigenv$vectors[,(ncol(eigenv$vectors)-k+1):ncol(eigenv$vectors)]
+ km <- kmeans(U, centers=k, nstart=5)
+ return(km)
+}
+
+Specc.normalised <- function(data,dfunc,k,nn){
+ L<- L.sym(data,dfunc,k,nn)
+ eigenv <- eigen(L, symmetric=TRUE)
+ U<- eigenv$vectors[,(ncol(eigenv$vectors)-k+1):ncol(eigenv$vectors)]
+ km <- kmeans(U, centers=k, nstart=5)
+ return(km)
+}
+
+
+specc.ncut <- function(data,dfunc,k,nn){
+  #ncut vector
+  Ncut <- c()
+  
+  #matrices
+  S<- SimMatrix(data,dfunc)
+  L<- L.rw(data,dfunc,k,nn)
+  
+  #eigenvalues
+  eigenv <- eigen(L, symmetric=FALSE)
+   n =length(eigenv$values)
+  U<- data.frame(1:n,eigenv$vectors[,2])
+  colnames(U)<-c("index","Eigen")
+  
+  #order U
+  U<-U[order(U$Eigen),]
+  #loop
+  for (i in 1: (n-1) ){
+    cut = 0
+    vol = 0
+    intv= 0
+    for (j in 1:i){
+      #cut
+      cut = cut + sum(S[j,(i+1):n])
+      #volume
+      vol = vol + sum(S[j,(j+1):n])
+    }
+    
+    #volume compiment
+    for (k in 1:(i-1)){
+      intv = intv + sum(S[k,(k+1):i])
+    }
+    
+    volc = sum(S[upper.tri(S, diag = FALSE)]) - intv
+    Ncut[i]=cut*( (1/vol)+(1/volc))
+    
+  }
+  
+ minIndex = (which(Ncut==min(Ncut)))
+ K1 = U$index[1:minIndex]
+ K2 = U$index[(minIndex+1):n]
+ colour = rep(1,length.out=n)
+ for (p in 1:length(K1)){
+   index = K1[p]
+   colour[index] = colour[index] +1
+ }
+ return(colour)
+}
+
+```
+
+
+```{r}
+library(mlbench)
+## K means versus Spectral clusternig on a spiral
+
+
+#simulating data
+set.seed(550)
+obj <- mlbench.spirals(150,1,0.025)
+data <-  3 * obj$x
+
+
+#plotting
+plot(data,xlab="",ylab="",pch=19, cex = 1.5)
+
+
+km<-Specc.normalised(data,d.GK,2,3)
+plot(data, col=km$cluster,xlab="",ylab="",pch=19,cex = 1.5)
+plot(data,col=kmeans(data,centers=2,nstart=5)$cluster,xlab="",ylab="",pch=19, cex = 1.5)
+```
+
+```{r}
+#simulating data
+set.seed(550)
+obj <- mlbench.2dnormals(100,cl = 3,sd=0.5,r=2.5)
+data <-  obj$x
+
+
+#plotting
+plot(data,xlab="",ylab="",pch=19,frame.plot = TRUE,axes = FALSE)
+
+
+
+plot(data, col=Specc.rw(data,d.GK,3,20)$cluster,xlab="",ylab="",pch=19,cex = 1.5,frame.plot = TRUE,axes = FALSE)
+
+plot(data, col=Specc.unormalised(data,d.GK,3,20)$cluster,xlab="",ylab="",pch=19,cex = 1.5,frame.plot = TRUE,axes = FALSE)
+
+plot(data, col=Specc.normalised(data,d.GK,3,20)$cluster,xlab="",ylab="",pch=19,cex = 1.5,frame.plot = TRUE,axes = FALSE)
+
+plot(data,col=kmeans(data,centers=3,nstart=1)$cluster,xlab="",ylab="",pch=19, cex = 1.5,frame.plot = TRUE,axes = FALSE)
+
+```
+
+```{r}
+#simulating data
+set.seed(550)
+obj <- mlbench.cassini(500)
+data <-  obj$x
+
+
+#plotting
+plot(data,xlab="",ylab="",pch=19,frame.plot = TRUE,axes = FALSE)
+
+
+km<-Specc.rw(data,d.GK,3)
+plot(data, col=km$cluster,xlab="",ylab="",pch=19,cex = 1.5,frame.plot = TRUE,axes = FALSE)
+
+km<-Specc.unormalised(data,d.GK,3)
+plot(data, col=km$cluster,xlab="",ylab="",pch=19,cex = 1.5,frame.plot = TRUE,axes = FALSE)
+
+km<-Specc.normalised(data,d.GK,3)
+plot(data, col=km$cluster,xlab="",ylab="",pch=19,cex = 1.5,frame.plot = TRUE,axes = FALSE)
+
+plot(data,col=kmeans(data,centers=3,nstart=1)$cluster,xlab="",ylab="",pch=19, cex = 1.5,frame.plot = TRUE,axes = FALSE)
+
+```
+
+
+```{r}
+#simulating data
+set.seed(550)
+obj <- mlbench.spirals(200,1,.05)
+data <-  obj$x
+
+
+#plotting
+plot(data,xlab="",ylab="",pch=19,frame.plot = TRUE,axes = FALSE)
+
+T_col = as.numeric(obj$classes)
+SC_col = as.numeric(Specc.normalised(data,d.GK,2,4)$cluster)
+KM_col = as.numeric(kmeans(data,centers=2,nstart=1)$cluster)
+
+
+
+plot(data, col=Specc.rw(data,d.GK,2,3)$cluster,xlab="",ylab="",pch=19,cex = 1.5,frame.plot = TRUE,axes = FALSE)
+
+plot(data, col=Specc.unormalised(data,d.GK,2,3)$cluster,xlab="",ylab="",pch=19,cex = 1.5,frame.plot = TRUE,axes = FALSE)
+
+plot(data, col=SC_col,xlab="",ylab="",pch=19,cex = 1.5,frame.plot = TRUE,axes = FALSE)
+
+plot(data,col=KM_col,xlab="",ylab="",pch=19, cex = 1.5,frame.plot = TRUE,axes = FALSE)
+
+
+```
+
+```{r}
+theta = seq(0,2*pi,length.out=100)
+r = 2
+x1 = r*cos(theta) + rnorm(length(theta),0,.15)
+y1 = r*sin(theta) + rnorm(length(theta),0,.15)
+r=0.5
+x2 = r*cos(theta) + rnorm(length(theta),0,.15)
+y2 = r*sin(theta) + rnorm(length(theta),0,.15)
+x<-c(x1,x2)
+y<-c(y1,y2)
+data<-data.frame(x,y)
+
+
+#plotting
+plot(data,xlab="",ylab="",pch=19,frame.plot = TRUE,axes = FALSE)
+
+
+
+plot(data, col=Specc.rw(data,d.GK,2,20)$cluster,xlab="",ylab="",pch=19,cex = 1.5,frame.plot = TRUE,axes = FALSE)
+
+plot(data, col=Specc.unormalised(data,d.GK,2,20)$cluster,xlab="",ylab="",pch=19,cex = 1.5,frame.plot = TRUE,axes = FALSE)
+
+plot(data, col=Specc.normalised(data,d.GK,2,20)$cluster,xlab="",ylab="",pch=19,cex = 1.5,frame.plot = TRUE,axes = FALSE)
+
+plot(data,col=kmeans(data,centers=2,nstart=1)$cluster,xlab="",ylab="",pch=19, cex = 1.5,frame.plot = TRUE,axes = FALSE)
+```
+
+```{r}
+circlegen<-function(n=100,circs=2,noise=0,type = "2D"){
+theta = seq(0,2*pi,length.out=n)
+r = .5
+x = r*cos(theta) + rnorm(length(theta),0,noise)
+y = r*sin(theta) + rnorm(length(theta),0,noise)
+for (i in 2:circs){
+r = .5 + (i-1)*.25 
+x1 = r*cos(theta) + rnorm(length(theta),0,noise)
+y1 = r*sin(theta) + rnorm(length(theta),0,noise)
+x<-c(x,x1)
+y<-c(y,y1)
+}
+if (type=="2D"){
+  data<-data.frame(x,y)
+}
+if (type =="Disc"){
+  zn =  r*cos(theta)
+  z <-zn
+  for (j in 2:circs){z<-c(z,zn)}
+  data<-data.frame(x,y,z)
+}
+if (type =="Spiral"){
+  zn = seq(1,2,length.out=n)
+  z <-zn
+  for (j in 2:circs){z<-c(z,zn)}
+  data<-data.frame(x,y,z)
+}
+return(data)
+}
+```
+
+```{r}
+
+data<-circlegen(100,2,noise=.02,type="Spiral")
+
+plot(data, col=Specc.normalised(data,d.GK,4,4)$cluster,xlab="",ylab="",pch=19,cex = 1.5,frame.plot = TRUE,axes = TRUE,xaxt='n',yaxt='n')
+
+km<-Specc.normalised(data,d.GK,2,4)$cluster
+plot3d(data, col=km,xlab="",ylab="",pch=19,cex = 1.5,frame.plot = TRUE,axes = FALSE,xaxt='n',yaxt='n',zaxt="n",zlab = "")
+axes3d(edges = "bbox", labels = FALSE, tick = FALSE)
+
+
+
+plot3d(data,col=kmeans(data,centers=3,nstart=1)$cluster,xlab="",ylab="",pch=19, cex = 1.5,frame.plot = TRUE,axes = TRUE,xaxt='n',yaxt='n',zaxt="n")
+
+
+```
+
+
+
+
+```{r}
+library(rgl)
+
+cuboids<-mlbench.cuboids(100)
+data<-cuboids$x
+plot3d( data[,1], data[,2], data[,3], type = "s", radius = .02 )
+library(kernlab)
+speco<-specc(data,4)
+plot3d( data[,1], data[,2], data[,3],col=speco, type = "s", radius = .02,xlab="",ylab="",zlab="" )
+```
+
+```{r}
+circ<-mlbench.smiley(500,0.05,0.05)
+data<-circ$x
+plot(data)
+
+#plotting
+plot(data,xlab="",ylab="",pch=19,frame.plot = TRUE,axes = FALSE)
+
+
+
+plot(data, col=Specc.rw(data,d.GK,4,10)$cluster,xlab="",ylab="",pch=19,cex = 1.5,frame.plot = TRUE,axes = FALSE)
+
+plot(data, col=Specc.unormalised(data,d.GK,4,10)$cluster,xlab="",ylab="",pch=19,cex = 1.5,frame.plot = TRUE,axes = FALSE)
+
+plot(data, col=Specc.normalised(data,d.GK,4,10)$cluster,xlab="",ylab="",pch=19,cex = 1.5,frame.plot = TRUE,axes = FALSE)
+
+plot(data,col=kmeans(data,centers=4,nstart=1)$cluster,xlab="",ylab="",pch=19, cex = 1.5,frame.plot = TRUE,axes = FALSE)
+
+```
+
+
+```{r}
+p <- mlbench.simplex()
+plot(p)
+
+library("lattice")
+cloud(x.3~x.1+x.2,  data=as.data.frame(p),col="black",pch=19)
+
+km<-Specc.normalised(p$x,d.GK,4,5)
+
+cloud(x.3~x.1+x.2, groups=km$cluster, data=as.data.frame(p),pch=19,cex=1)
+```
+
+```{r}
+data<-circlegen(150,2,noise=.01,type="Spiral")
+
+sc<-Specc.normalised(data,d.GK,2,4)$cluster
+km<-kmeans(data,centers=2,nstart=1)$cluster
+p <-as.data.frame(data)
+colnames(p)<-c("x.1","x.2","x.3")
+cloud(x.3~x.1+x.2, groups=sc, data=p,pch=19,cex=1)
+cloud(x.3~x.1+x.2, groups=km, data=p,pch=19,cex=1)
+cloud(x.3~x.1+x.2, col="black", data=p,pch=19,cex=1)
+
+```
+
+```{r}
+data<-circlegen(150,2,noise=.01,type="Disc")
+
+sc<-Specc.normalised(data,d.GK,2,4)$cluster
+km<-kmeans(data,centers=2,nstart=1)$cluster
+p <-as.data.frame(data)
+colnames(p)<-c("x.1","x.2","x.3")
+cloud(x.3~x.1+x.2, groups=sc, data=p,pch=19,cex=1)
+cloud(x.3~x.1+x.2, groups=km, data=p,pch=19,cex=1)
+cloud(x.3~x.1+x.2, col="black", data=p,pch=19,cex=1)
+```
+
+
+
+
+
+
+
+
+
+
+
+\\\\\\\\\\\\\\\\\\\\\\\ IMAGE SEGMENTATION \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
+
+
+
+```{r}
+h<-mlbench.shapes()
+data<-h$x
+plot(data)
+
+rw.result<-Specc.rw(data,d.GK,4)
+plot(data, col=rw.result$cluster,xlab="",ylab="",pch=19,cex = 1.5,main="RW SC")
+
+
+norm.result<-Specc.normalised(data,d.GK,4)
+plot(data, col=norm.result$cluster,xlab="",ylab="",pch=19,cex = 1.5,main="Norm SC")
+```
+
+
+
+```{r}
+library(jpeg)
+rawimg=readJPEG("egg.jpg")
+rawimg= (1/3)*(rawimg[,,1]+rawimg[,,2]+rawimg[,,3])
+rawimg=t(rawimg)
+rawimg=rawimg[,ncol(rawimg):1]
+image(rawimg,col = grey((0:12)/12))
+
+```
+
+
+
+```{r}
+# Smooth the image
+library(fields)
+smoothimg=image.smooth(rawimg,theta=5)
+image(smoothimg,col = grey((0:12)/12))
+```
+
+```{r}
+############
+# Reduce Size of Image
+############
+
+olddim=dim(rawimg)
+newdim=c(round(olddim/30))
+prod(newdim)>2^31
+img=matrix(NA,newdim[1],newdim[2])
+for (r in 1:newdim[1]) {
+  centerx=(r-1)/newdim[1]*olddim[1]+1
+  lowerx=max(1,round(centerx-olddim[1]/newdim[1]/2,0))
+  upperx=min(olddim[1],round(centerx+olddim[1]/newdim[1]/2,0))
+  for (c in 1:newdim[2]) {
+    centery=(c-1)/newdim[2]*olddim[2]+1
+    lowery=max(1,round(centery-olddim[2]/newdim[2]/2,0))
+    uppery=min(olddim[2],round(centery+olddim[2]/newdim[2]/2,0))
+    img[r,c]=mean(smoothimg$z[lowerx:upperx,lowery:uppery])
+  }
+}
+image(img,col = grey((0:12)/12))
+```
+
+
+```{r}
+############
+# Convert matrix to vector
+############
+
+imgvec=matrix(NA,prod(dim(img)),3)
+counter=1
+for (r in 1:nrow(img)) {
+  for (c in 1:ncol(img)) {
+    imgvec[counter,1]=r
+    imgvec[counter,2]=c
+    imgvec[counter,3]=img[r,c]
+   
+    counter=counter+1
+  }
+}
+
+############
+# Similarity Matrix
+############
+
+pixdiff=2
+sigma2=.01 #var(imgvec[,3])
+simmatrix=matrix(0,nrow(imgvec),nrow(imgvec))
+for(r in 1:nrow(imgvec)) {
+  cat(r,"out of",nrow(imgvec),"\n")
+  simmatrix[r,]=ifelse(abs(imgvec[r,1]-imgvec[,1])<=pixdiff & abs(imgvec[r,2]-imgvec[,2])<=pixdiff,exp(-(imgvec[r,3]-imgvec[,3])^2/sigma2),0)
+}
+ 
+A<- AffMatrix(simmatrix,5)
+D<- Dmatrix(A)
+L<-(D-A)
+
+
+evU=eigen(L,symmetric=TRUE)
+
+
+kmU=kmeans(evU$vectors[,(ncol(simmatrix)-1):(ncol(simmatrix)-0)],centers=2,nstart=5)
+segmatU=matrix(kmU$cluster-1,newdim[1],newdim[2],byrow=T)
+
+
+############
+# Plotting the clusters
+############
+
+
+image(segmatU, col=grey((0:12)/12))
+
+```
+
+
+
+```{r}
+############
+# Overlaying the original and the clusters
+############
+image(seq(0,1,length.out=olddim[1]),seq(0,1,length.out=olddim[2]),rawimg,col = grey((0:12)/12),xlim=c(-.1,1.1),ylim=c(-.1,1.1),xlab="",ylab="")
+
+segmat=segmatU
+linecol=2
+linew=3
+for(r in 2:newdim[1]) {
+  for (c in 2:newdim[2]) {
+    if(abs(segmat[r-1,c]-segmat[r,c])>0) {
+      xloc=(r-1)/(newdim[1])
+      ymin=(c-1)/(newdim[2])
+      ymax=(c-0)/(newdim[2])
+      segments(xloc,ymin,xloc,ymax,col=linecol,lwd=linew)
+    }
+    if(abs(segmat[r,c-1]-segmat[r,c])>0) {
+      yloc=(c-1)/(newdim[2])
+      xmin=(r-1)/(newdim[1])
+      xmax=(r-0)/(newdim[1])
+      segments(xmin,yloc,xmax,yloc,col=linecol,lwd=linew)
+    }
+  }
+}
+```
+
+
+
+
+```{r}
+set.seed(550)
+obj <- mlbench.2dnormals(100,cl = 3,sd=0.5,r=8)
+data <-  obj$x
+plot(data,main= "Plot of Data",xlab="",ylab="",pch=19)
+S <- SimMatrix(data,d.GK)
+Ls <- Dmatrix(S)-S
+Ls.eigen <- eigen(L,symmetric = TRUE)
+eigs.toPlot <-sort(Ls.eigen$values)[1:5]
+plot(eigs.toPlot,cex=1.5,main= "Plot of Eigenvalues",xlab="",ylab="",pch=19,col=c(1,1,1,"red","red"))
+abline(eigs.toPlot[4],0,col="red",lty= "dashed")
+```
+```{r}
+#increasing k means
+
+#simulating data
+set.seed(550)
+obj <- mlbench.spirals(300,1.5,0.03)
+data <-  obj$x
+
+
+#plotting
+plot(data,xlab="",ylab="",pch=19,frame.plot = TRUE,axes = FALSE)
+
+k1 <- Specc.normalised(data,d.GK,2,2)$cluster
+k3 <- Specc.normalised(data,d.GK,2,3)$cluster
+k6<- Specc.normalised(data,d.GK,2,6)$cluster
+k10<- Specc.normalised(data,d.GK,2,10)$cluster
+
+
+plot(data, col=k3,xlab="",ylab="",pch=19,cex = 1.5,frame.plot = TRUE,axes = FALSE,main="k = 3")
+
+plot(data, col=k6,xlab="",ylab="",pch=19,cex = 1.5,frame.plot = TRUE,axes = FALSE,main="k = 6")
+
+plot(data, col=k10,xlab="",ylab="",pch=19,cex = 1.5,frame.plot = TRUE,axes = FALSE,main="k = 10")
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
