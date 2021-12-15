@@ -1,0 +1,81 @@
+## Functions -------------------------------------------------------------------------------------------------------------------------------
+
+"%^%" <- function(M, power) with(eigen(M), vectors %*% (values^power * solve(vectors)))
+
+## Distance Measures -----------------------------------------------------------
+
+## Euclidean Distance
+d.ED <- function(x1, x2, alpha=1) {
+  return(norm(as.matrix(x1-x2)))
+ }
+
+## Gaussian Kernel
+d.GK <- function(x1, x2, alpha=1) {
+ return( exp(- alpha * norm(as.matrix(x1-x2), type="F")))
+}
+
+
+## Similarity Matrix -----------------------------------------------------------
+
+SimMatrix <- function(data,dfunc){
+
+  n <- nrow(data)
+  S <- matrix(nrow = n, ncol=n)
+  for(i in 1:n) {
+    for(j in 1:n) {
+      S[i,j] <- dfunc(data[i,],data[j,])
+    }
+  }
+  return(S)
+
+}
+
+## Affinity Matrix -------------------------------------------------------------
+
+AffMatrix <- function(S, nn) {
+  N <- length(S[,1])
+
+  if (nn >= N) {
+    A <- S
+  } else {
+    A <- matrix(0,nrow = N, ncol=N)
+    for(i in 1:N) {
+      ranked.distance <- sort(S[i,], decreasing=TRUE)[1:(nn+1)]
+      for (k in ranked.distance) {
+        j <- which(S[i,] == k)
+        A[i,j] <- S[i,j]
+        A[j,i] <- S[i,j]
+      }
+    }
+  }
+   return(A)
+}
+
+Dmatrix <- function(A){
+  return(diag(apply(A,1,sum)))
+}
+
+## Laplacian functions ---------------------------------------------------------
+
+L.unormalised <- function(data,dfunc,k,nn){
+A<- AffMatrix(SimMatrix(data,dfunc),nn)
+D<- Dmatrix(A)
+return(D-A)
+}
+
+L.rw <- function(data,dfunc,k,nn){
+A<- AffMatrix(SimMatrix(data,dfunc),nn)
+D<- Dmatrix(A)
+I<- diag(x=1,nrow=nrow(D),ncol=ncol(D))
+return(I-solve(D)%*%A)
+} 
+
+L.sym<- function(data,dfunc,k,nn){
+A<- AffMatrix(SimMatrix(data,dfunc),nn)
+D<- Dmatrix(A)
+
+return((D%^%(-0.5))%*%(D-A)%*%(D%^%(-0.5)))
+}
+
+
+```
